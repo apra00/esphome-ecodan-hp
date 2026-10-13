@@ -243,12 +243,12 @@ namespace ecodan
         std::chrono::time_point<std::chrono::steady_clock> LastAttempt{};
     };
 
-    #define MAX_SERVICE_CODE_CMD_SIZE 5
+    #define MAX_SERVICE_CODE_CMD_SIZE 6
     ServiceCodeRuntime serviceCodeCmdQueue[MAX_SERVICE_CODE_CMD_SIZE] = {
         ServiceCodeRuntime{Status::REQUEST_CODE::COMPRESSOR_STARTS, false, 60*60, std::chrono::steady_clock::now() - std::chrono::seconds(60*60)},
         ServiceCodeRuntime{Status::REQUEST_CODE::TH4_DISCHARGE_TEMP, true, 0, std::chrono::steady_clock::time_point{}},
         ServiceCodeRuntime{Status::REQUEST_CODE::TH3_LIQUID_PIPE1_TEMP, true, 0, std::chrono::steady_clock::time_point{}},
-        //ServiceCodeRuntime{Status::REQUEST_CODE::TH6_2_PHASE_PIPE_TEMP, true, 0, std::chrono::steady_clock::time_point{}},
+        ServiceCodeRuntime{Status::REQUEST_CODE::TH6_2_PHASE_PIPE_TEMP, true, 0, std::chrono::steady_clock::time_point{}},
         //ServiceCodeRuntime{Status::REQUEST_CODE::TH32_SUCTION_PIPE_TEMP, true, 0, std::chrono::steady_clock::time_point{}},
         //ServiceCodeRuntime{Status::REQUEST_CODE::TH8_HEAT_SINK_TEMP, true, 0, std::chrono::steady_clock::time_point{}},
         ServiceCodeRuntime{Status::REQUEST_CODE::DISCHARGE_SUPERHEAT, true, 0, std::chrono::steady_clock::time_point{}},
@@ -287,6 +287,7 @@ namespace ecodan
                     serviceCodeCmdQueue[serviceCodeCmdIndex].LastAttempt = std::chrono::steady_clock::now();
                 } 
                 activeRequestCode = serviceCodeCmdQueue[serviceCodeCmdIndex].Request;
+                activeRequestCodeRetries = 0; 
             }
             //ESP_LOGE(TAG, "Active svc: %d", static_cast<int16_t>(activeRequestCode));
             return true;
@@ -313,7 +314,16 @@ namespace ecodan
         if (this->is_connected() && this->requestCodesEnabled && activeRequestCode != Status::REQUEST_CODE::NONE) {
             unsigned long current_time = millis();
             if (current_time - last_svc_request_time >= REQUEST_RETRY_INTERVAL) {
-                ESP_LOGD(TAG, "Sending active service request (code %d)...", activeRequestCode);
+                
+                // Abort if we have exceeded the maximum number of retries
+                if (activeRequestCodeRetries >= 10) {
+                    ESP_LOGW(TAG, "Service request code %d aborted after 10 retries without valid data.", static_cast<int16_t>(activeRequestCode));
+                    activeRequestCode = Status::REQUEST_CODE::NONE;
+                    activeRequestCodeRetries = 0;
+                    return true; // Unblock normal polling loop
+                }
+
+                ESP_LOGD(TAG, "Sending active service request (code %d, attempt %d)...", static_cast<int16_t>(activeRequestCode), activeRequestCodeRetries + 1);
                 Message svc_cmd{MsgType::GET_CMD, GetType::SERVICE_REQUEST_CODE, static_cast<int16_t>(activeRequestCode)};
                 if (!serial_tx(svc_cmd))
                 {
@@ -322,6 +332,7 @@ namespace ecodan
                     return false;
                 }
                 last_svc_request_time = current_time;
+                activeRequestCodeRetries++;
             }
 
             return false;
