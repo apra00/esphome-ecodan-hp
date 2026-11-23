@@ -1,6 +1,6 @@
 substitutions:
-  uart_rx_pin: 2
-  uart_tx_pin: 1
+  uart_rx_pin: 17
+  uart_tx_pin: 16
 
 esphome:
   name: ${name}
